@@ -29,14 +29,21 @@ module.exports = {
         let promises = [];
 
         this.readConfig('hosts').forEach(h => {
-          const conn = new Client();
+          const conn = h.connection || new Client();
           promises.push(
             conn.connect({
               host: h.host,
               username: h.username,
               agent: process.env.SSH_AUTH_SOCK
             })
-            .then(conn => { return {conn: conn, host: h.host }})
+            .then(conn => {
+              this.log(`Successful connection to ${h.host}`, {color: 'green'});
+              return {conn: conn, host: h.host }
+            })
+            .catch(err => {
+              this.log(`Failed to connect to ${h.host}: ${err}`, {color: 'red'});
+              throw err;
+            })
           );
         });
 
@@ -90,30 +97,34 @@ module.exports = {
             })
             .catch(e => {
               this.log(`Failed to upload to ${conn.host}: ${e}`, {color: 'red'});
+              throw e;
             });
 
           promises.push(promise);
         });
 
-        return RSVP.all(promises)
-          .then(() => this.log(`Finished uploading`, {color: 'green'}))
-          .catch(e => this.log(`There was an upload error: ${e}`, {color: 'red'}));
+        return RSVP.all(promises).then(() => this.log(`Finished uploading`, {color: 'green'}));
       },
 
       activate(context) {
         // change current revision symlink to the one we just uploaded
-        const linkPromise = this._linkRelease(context)
+        const linkPromises = this._linkRelease(context)
           .then(() => this.log('Successfully activated latest revision', {color: 'green'}))
-          .catch(e => this.log(`Failed to activate latest revision: ${e}`, {color: 'red'}));
+          .catch(e => {
+            this.log(`Failed to activate latest revision: ${e}`, {color: 'red'});
+            throw e;
+          });
 
         // allow web server to read files
-        const permPromise = this._setFilePermissions(context)
+        const permPromises = this._setFilePermissions(context)
           .then(() => this.log('Successfully set permissions of latest revison', {color: 'green'}))
-          .catch(e => this.log(`Failed to set permissions of latest revision: ${e}`, {color: 'red'}));
+          .catch(e => {
+            this.log(`Failed to set permissions of latest revision: ${e}`, {color: 'red'});
+            throw e;
+          });
 
-        return RSVP.all([linkPromise, permPromise])
-          .then(() => this.log('Finished activation'), {color: 'green'})
-          .catch(() => this.log('Activation failed', {color: 'red'}));
+        const promises = [linkPromises, permPromises];
+        return RSVP.all(promises).then(() => this.log('Finished activation', {color: 'green'}));
       },
 
       didActivate(context) {
@@ -121,34 +132,31 @@ module.exports = {
         return new RSVP.Promise((resolve, reject) => {
           // get releases from newest to oldest
           const releases = this._fetchReleasesByDate(context);
-          releases.then((hostReleases) => {
-            Object.keys(hostReleases).forEach(h => {
-              // from the list of releases, select the ones to delete
-              const del = this._fetchReleasesToDelete(context, hostReleases[h]);
+          releases.then(hostReleases => {
+            let del = {};
 
-              if(del.length == 0) {
-                this.log(`Nothing to delete`, {color: 'green'});
-                resolve(true);
-              }
-              else {
-                this.log(`Preparing to delete ${del} on ${h}`, {color: 'yellow'});
-
-                this._deleteReleases(context, del)
-                  .then(() => {
-                    this.log(`Successfully deleted old releases`, {color: 'green'});
-                    resolve(true)
-                  })
-                  .catch(e => {
-                    this.log(`Failed to delete old releases ${e}`, {color: 'red'});
-                    reject(false);
-                  });
-              }
+            hostReleases.forEach(hr => {
+              const host = hr.conn.host;
+              del[host] = this._fetchReleasesToDelete(context, hr.releases);
             });
-          }).catch(e => {
-            this.log(`There was a problem finding releases: ${e}`, {color: 'red'});
-            reject(false);
+
+            this.log(`Keeping ${this.readConfig('keep')} release(s)`, {color: 'green'});
+
+            this._deleteReleases(context, del)
+              .then(() => {
+                this.log('Finished deleting old releases', {color: 'green'});
+                resolve(true);
+              })
+              .catch(e => {
+                this.log(`Failed to delete old releases: ${e}`, {color: 'red'})
+                reject(e);
+              });
+          }).catch((e) => {
+            this.log(`Error fetching releases: ${e}`, {color: 'red'});
+            reject(e);
           });
-        });
+        })
+
       },
 
       teardown(context) {
@@ -174,7 +182,7 @@ module.exports = {
         return new RSVP.Promise((resolve, reject) => {
           conn.execCommand(command, {stream: 'both'}).then((result) => {
             if (result.stderr) {
-              this.log(`Error running ${command}: ${result.stderr}`, {color: 'green'});
+              this.log(`Error running ${command}: ${result.stderr}`, {color: 'red'});
               reject(result.stderr);
             };
 
@@ -215,7 +223,7 @@ module.exports = {
       },
 
       _fetchReleasesByDate(context) {
-        let hostReleases = {};
+        let hostReleases = [];
         let promises = [];
 
         const cmd = `ls -t ${context.releasesPath}`;
@@ -224,29 +232,26 @@ module.exports = {
           const promise = this._execCommand(conn.conn, cmd);
 
           promise.then(stdout => {
+            if(!stdout) {
+              stdout = "";
+            }
             const releases = stdout.split("\n");
-            hostReleases[conn.host] = releases;
+            hostReleases.push({conn: conn, releases: releases});
           })
           .catch(stderr => {
             this.log(`stderr ${stderr}`, {color: 'red'});
+            throw stderr;
           });
 
           promises.push(promise);
         });
 
-        return RSVP.all(promises)
-          .then(() => hostReleases)
-          .catch(e => {
-            this.log(`Failed to fetch releases: ${e}`, {color: 'red'});
-            return {};
-          });
+        return RSVP.all(promises).then(() => hostReleases);
       },
 
       _fetchReleasesToDelete(context, releases) {
         const keep = this.readConfig('keep');
         const delIndex = keep - 1; // delete after this index
-
-        this.log(`Keeping ${keep} releases`, {color: 'green'});
 
         let del = [];
         releases.forEach((r,i) => {
@@ -260,11 +265,26 @@ module.exports = {
       },
 
       _deleteReleases(context, del) {
-        const delStr = del.map(r => `./${r}`).join(' ');
-        const cmd = `cd ${context.releasesPath}`
-          + ` && rm -rf ${delStr}`;
+        let promises = [];
+        context.connections.forEach(conn => {
+          const host = conn.host;
+          const hostDel = del[host];
 
-        return this._execCommandAll(context, cmd);
+          if(hostDel.length) {
+            const delStr = hostDel.map(r => `./${r}`).join(' ');
+            const cmd = `cd ${context.releasesPath}`
+              + ` && rm -rf ${delStr}`;
+
+            this.log(`Deleting ${delStr} on ${host}`, {color: 'yellow'});
+
+            promises.push(this._execCommand(conn.conn, cmd));
+          }
+          else {
+            this.log(`Nothing to delete on ${host}`, {color: 'green'});
+          }
+        });
+
+        return RSVP.all(promises);
       }
     });
 
