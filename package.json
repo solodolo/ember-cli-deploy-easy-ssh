@@ -6,7 +6,7 @@
     "ember-addon",
     "ember-cli-deploy-plugin"
   ],
-  "repository": "",
+  "repository": "https://github.com/solodolo/ember-cli-deploy-easy-ssh",
   "license": "MIT",
   "author": "Andrew Mettlach",
   "directories": {
