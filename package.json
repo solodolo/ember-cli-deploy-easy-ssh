@@ -1,14 +1,14 @@
 {
   "name": "ember-cli-deploy-easy-ssh",
   "version": "0.0.0",
-  "description": "The default blueprint for ember-cli addons.",
+  "description": "Deploy your Ember application to one or more hosts via SSH.",
   "keywords": [
     "ember-addon",
     "ember-cli-deploy-plugin"
   ],
   "repository": "",
   "license": "MIT",
-  "author": "",
+  "author": "Andrew Mettlach",
   "directories": {
     "doc": "doc",
     "test": "tests"
