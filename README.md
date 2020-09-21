@@ -1,8 +1,8 @@
 ember-cli-deploy-easy-ssh
 ==============================================================================
 
-This is an addon to deploy ember-cli based apps to our backends over SSH.  The
-deployment steps are as follows:
+This is an addon to deploy ember-cli based apps to one or more servers via SSH.
+The deployment steps are as follows:
 
 1. The Ember app is built and the assets are stored somewhere.
 2. For each host defined in the config, upload the assets over SSH.
