@@ -1,6 +1,6 @@
 {
   "name": "ember-cli-deploy-easy-ssh",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Deploy your Ember application to one or more hosts via SSH.",
   "keywords": [
     "ember-addon",
